@@ -6,37 +6,12 @@ on:
       - main
 
 jobs:
-  analyze-and-deploy:
+  build-analyze-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout repo
       uses: actions/checkout@v3
-
-    - name: SonarQube Analysis
-      uses: sonarsource/sonarqube-scan-action@master
-      with:
-        projectBaseDir: .
-        args: >
-          -Dsonar.projectKey=LMS_Frontend
-          -Dsonar.sources=.
-          -Dsonar.host.url=https://sonar.leran.xyz
-          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-
-    - name: Wait for Quality Gate result
-      id: qualitygate
-      uses: sonarsource/sonarqube-quality-gate-action@master
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: https://sonar.leran.xyz
-
-    - name: Check Quality Gate Status
-      run: |
-        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.quality_gate_status }}"
-        if [[ "${{ steps.qualitygate.outputs.quality_gate_status }}" != "PASSED" ]]; then
-          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
-          exit 1
-        fi
 
     - name: Setup Node.js
       uses: actions/setup-node@v3
@@ -46,10 +21,40 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
+    - name: Run SonarQube Scan
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        npm install -g sonar-scanner
+        sonar-scanner \
+          -Dsonar.projectKey=LMS_Frontend \
+          -Dsonar.sources=src \
+          -Dsonar.host.url=https://sonar.leran.xyz \
+          -Dsonar.login=$SONAR_TOKEN
+
+    - name: Wait for Quality Gate result
+      id: qualitygate
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        echo "Waiting for SonarQube Quality Gate..."
+        sleep 30  # Wait for the analysis to finish
+        STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonar.leran.xyz/api/qualitygates/project_status?projectKey=LMS_Frontend" | jq -r '.projectStatus.status')
+        echo "Quality Gate Status: $STATUS"
+        echo "qualityGateStatus=$STATUS" >> $GITHUB_OUTPUT
+
+    - name: Check Quality Gate Result
+      run: |
+        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.qualityGateStatus }}"
+        if [[ "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "OK" && "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "PASSED" ]]; then
+          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
+          exit 1
+        fi
+
     - name: Build frontend
       run: npm run build
 
-    - name: Ensure remote folder & fix permissions
+    - name: Prepare EC2 folder
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.EC2_HOST }}
@@ -70,3 +75,4 @@ jobs:
         port: 22
         source: "dist/*"
         target: "/var/www/html/LMS_frontend"
+
