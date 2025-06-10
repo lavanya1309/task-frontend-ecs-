@@ -1,0 +1,75 @@
+name: Deploy LMS Frontend with SonarQube Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-analyze-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build frontend
+      run: npm run build
+
+    - name: SonarQube Analysis
+      uses: SonarSource/sonarqube-scan-action@v1.1
+      with:
+        projectBaseDir: .
+        args: >
+          -Dsonar.projectKey=LMS_Frontend
+          -Dsonar.sources=.
+          -Dsonar.host.url=https://sonar.leran.xyz
+          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+    
+    - name: Wait for Quality Gate result
+      id: qualitygate
+      uses: SonarSource/sonarqube-quality-gate-action@v1.1
+      with:
+        sonarToken: ${{ secrets.SONAR_TOKEN }}
+        sonarHostUrl: https://sonar.leran.xyz
+        projectKey: LMS_Frontend
+        # timeout in seconds (default is 300)
+        timeoutSeconds: 300
+
+    - name: Check Quality Gate Score
+      run: |
+        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.qualityGateStatus }}"
+        if [[ "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "OK" ]]; then
+          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
+          exit 1
+        fi
+
+    - name: Ensure remote folder & fix permissions
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          sudo mkdir -p /var/www/html/LMS_frontend
+          sudo rm -rf /var/www/html/LMS_frontend/*
+          sudo chown -R ${{ secrets.EC2_USERNAME }}:www-data /var/www/html/LMS_frontend
+          sudo chmod -R 775 /var/www/html/LMS_frontend
+
+    - name: Deploy to EC2
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22
+        source: "dist/*"
+        target: "/var/www/html/LMS_frontend"
