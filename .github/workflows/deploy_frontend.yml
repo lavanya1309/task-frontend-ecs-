@@ -23,7 +23,7 @@ jobs:
 
     - name: Run SonarQube Scan
       env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
       run: |
         npm install -g sonar-scanner
         sonar-scanner \
@@ -35,10 +35,10 @@ jobs:
     - name: Wait for Quality Gate result
       id: qualitygate
       env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
       run: |
         echo "Waiting for SonarQube Quality Gate..."
-        sleep 30  # Wait for the analysis to finish
+        sleep 30
         STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonar.leran.xyz/api/qualitygates/project_status?projectKey=LMS_Frontend" | jq -r '.projectStatus.status')
         echo "Quality Gate Status: $STATUS"
         echo "qualityGateStatus=$STATUS" >> $GITHUB_OUTPUT
@@ -75,4 +75,3 @@ jobs:
         port: 22
         source: "dist/*"
         target: "/var/www/html/LMS_frontend"
-
