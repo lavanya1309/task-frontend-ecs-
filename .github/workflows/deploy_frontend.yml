@@ -6,12 +6,37 @@ on:
       - main
 
 jobs:
-  build-analyze-deploy:
+  analyze-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout code
       uses: actions/checkout@v3
+
+    - name: SonarQube Analysis
+      uses: sonarsource/sonarqube-scan-action@master
+      with:
+        projectBaseDir: .
+        args: >
+          -Dsonar.projectKey=LMS_Frontend
+          -Dsonar.sources=.
+          -Dsonar.host.url=https://sonar.leran.xyz
+          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+    - name: Wait for Quality Gate result
+      id: qualitygate
+      uses: sonarsource/sonarqube-quality-gate-action@master
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: https://sonar.leran.xyz
+
+    - name: Check Quality Gate Status
+      run: |
+        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.quality_gate_status }}"
+        if [[ "${{ steps.qualitygate.outputs.quality_gate_status }}" != "PASSED" ]]; then
+          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
+          exit 1
+        fi
 
     - name: Setup Node.js
       uses: actions/setup-node@v3
@@ -23,33 +48,6 @@ jobs:
 
     - name: Build frontend
       run: npm run build
-
-    - name: SonarQube Analysis
-      uses: sonarsource/sonarqube-scan-action@master
-      with:
-        projectBaseDir: .
-        args: >
-          -Dsonar.projectKey=LMS_Frontend
-          -Dsonar.sources=.
-          -Dsonar.host.url=https://sonar.leran.xyz
-          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-    
-    - name: Wait for Quality Gate result
-      id: qualitygate
-      uses: sonarsource/sonarqube-quality-gate-action@master
-      with:
-        sonarToken: ${{ secrets.SONAR_TOKEN }}
-        sonarHostUrl: https://sonar.leran.xyz
-        projectKey: LMS_Frontend
-        timeoutSeconds: 300
-
-    - name: Check Quality Gate Score
-      run: |
-        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.qualityGateStatus }}"
-        if [[ "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "OK" ]]; then
-          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
-          exit 1
-        fi
 
     - name: Ensure remote folder & fix permissions
       uses: appleboy/ssh-action@v0.1.10
