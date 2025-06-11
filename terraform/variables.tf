@@ -3,7 +3,7 @@ variable "aws_region" {
 }
 
 variable "app_name" {
-  default = "react-frontend"
+  default = "react-frontend1"
 }
 
 variable "docker_image" {
