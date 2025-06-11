@@ -131,7 +131,7 @@ resource "aws_ecs_task_definition" "app" {
     image     = var.docker_image
     essential = true
     portMappings = [
-      { containerPort = 3000, hostPort = 80 }
+      { containerPort = 80, hostPort = 3000 }
       
     ]
   }])
