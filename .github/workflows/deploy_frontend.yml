@@ -5,6 +5,18 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
 env:
   AWS_REGION: us-east-1
   APP_NAME: lms-frontend
@@ -14,7 +26,7 @@ env:
   STATE_LOCK_ID: ecs/terraform.tfstate
 
 jobs:
-  build-push-deploy:
+  terraform:
     runs-on: ubuntu-latest
 
     steps:
@@ -48,7 +60,7 @@ jobs:
     - name: 🐳 Log in to Docker Hub
       run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-    - name: 🐳 Build Docker image with version and latest tags
+    - name: 🐳 Build Docker image
       run: |
         docker build -t $DOCKER_IMAGE .
         docker tag $DOCKER_IMAGE $DOCKER_IMAGE_LATEST
@@ -78,7 +90,7 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: 🧹 Force remove stuck DynamoDB lock (if any)
+    - name: 🧹 Remove stuck DynamoDB lock (if any)
       run: |
         aws dynamodb delete-item \
           --table-name $DYNAMODB_TABLE \
@@ -89,14 +101,24 @@ jobs:
       working-directory: terraform
       run: terraform init -input=false
 
-    - name: 🔄 Terraform Import Existing IAM Roles
+    - name: 🔄 Terraform Import Existing IAM Resources
       working-directory: terraform
       run: |
         terraform import aws_iam_role.ecs_instance_role react-frontend1-ecs-instance-role || true
         terraform import aws_iam_role.ecs_task_execution_role react-frontend1-task-execution-role || true
         terraform import aws_iam_instance_profile.ecs_instance_profile react-frontend1-ecs-instance-profile || true
 
+    - name: 📋 Terraform Plan
+      if: github.event.inputs.action == 'plan'
+      working-directory: terraform
+      run: terraform plan -var="docker_image=$DOCKER_IMAGE_LATEST"
 
-    - name: 🧱 Terraform Apply (Deploy ECS EC2)
+    - name: 🚀 Terraform Apply
+      if: github.event.inputs.action == 'apply'
       working-directory: terraform
       run: terraform apply -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
+
+    - name: 💣 Terraform Destroy
+      if: github.event.inputs.action == 'destroy'
+      working-directory: terraform
+      run: terraform destroy -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
