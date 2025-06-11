@@ -1,77 +1,86 @@
-name: Deploy LMS Frontend with SonarQube Quality Gate
+name: CI/CD Frontend - ECS EC2 Deploy
 
 on:
   push:
     branches:
-      - mai
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  APP_NAME: lms-frontend
+  DOCKER_USERNAME: somasekar1309
+  REPO_NAME: testingpipline-lms-frontend
 
 jobs:
-  build-analyze-deploy:
+  build-push-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: 🧾 Checkout code
       uses: actions/checkout@v3
 
-    - name: Setup Node.js
+    - name: 🏷️ Set Docker image version tag
+      id: vars
+      run: |
+        VERSION_TAG="v$(git rev-list --count HEAD)"
+        echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
+        echo "DOCKER_IMAGE=$DOCKER_USERNAME/$REPO_NAME:$VERSION_TAG" >> $GITHUB_ENV
+        echo "DOCKER_IMAGE_LATEST=$DOCKER_USERNAME/$REPO_NAME:latest" >> $GITHUB_ENV
+
+    - name: ⚙️ Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '18'
 
-    - name: Install dependencies
+    - name: 📦 Install dependencies
       run: npm ci
 
-    - name: Run SonarQube Scan
-      env:
-        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
-      run: |
-        npm install -g sonar-scanner
-        sonar-scanner \
-          -Dsonar.projectKey=LMS_Frontend \
-          -Dsonar.sources=src \
-          -Dsonar.host.url=https://sonar.leran.xyz \
-          -Dsonar.login=$SONAR_TOKEN
-
-    - name: Wait for Quality Gate result
-      id: qualitygate
-      env:
-        SONAR_TOKEN: sqa_2896b81aab5d57bc3b116c6c2308378c8f287613
-      run: |
-        echo "Waiting for SonarQube Quality Gate..."
-        sleep 30
-        STATUS=$(curl -s -u $SONAR_TOKEN: "https://sonar.leran.xyz/api/qualitygates/project_status?projectKey=LMS_Frontend" | jq -r '.projectStatus.status')
-        echo "Quality Gate Status: $STATUS"
-        echo "qualityGateStatus=$STATUS" >> $GITHUB_OUTPUT
-
-    - name: Check Quality Gate Result
-      run: |
-        echo "Quality Gate Status: ${{ steps.qualitygate.outputs.qualityGateStatus }}"
-        if [[ "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "OK" && "${{ steps.qualitygate.outputs.qualityGateStatus }}" != "PASSED" ]]; then
-          echo "❌ SonarQube Quality Gate failed. Stopping deployment."
-          exit 1
-        fi
-
-    - name: Build frontend
+    - name: 🛠️ Build React frontend
       run: npm run build
 
-    - name: Prepare EC2 folder
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          sudo mkdir -p /var/www/html/LMS_frontend
-          sudo rm -rf /var/www/html/LMS_frontend/*
-          sudo chown -R ${{ secrets.EC2_USERNAME }}:www-data /var/www/html/LMS_frontend
-          sudo chmod -R 775 /var/www/html/LMS_frontend
+    - name: 📄 Create .dockerignore
+      run: |
+        echo "node_modules" > .dockerignore
+        echo "terraform" >> .dockerignore
+        echo ".github" >> .dockerignore
 
-    - name: Deploy to EC2
-      uses: appleboy/scp-action@v0.1.7
+    - name: 🐳 Log in to Docker Hub
+      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+    - name: 🐳 Build Docker image with version and latest tags
+      run: |
+        docker build -t $DOCKER_IMAGE .
+        docker tag $DOCKER_IMAGE $DOCKER_IMAGE_LATEST
+
+    - name: 🚀 Push Docker images
+      run: |
+        docker push $DOCKER_IMAGE
+        docker push $DOCKER_IMAGE_LATEST
+
+    - name: 📊 SonarQube Scan
+      uses: sonarsource/sonarqube-scan-action@v1.0.0
       with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        port: 22
-        source: "dist/*"
-        target: "/var/www/html/LMS_frontend"
+        projectBaseDir: .
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+    - name: ⚙️ Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.6.6
+
+    - name: 🔐 Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: 🧱 Terraform Init
+      working-directory: terraform
+      run: terraform init
+
+    - name: 🧱 Terraform Apply (Deploy ECS EC2)
+      working-directory: terraform
+      run: terraform apply -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
