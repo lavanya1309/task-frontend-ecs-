@@ -78,7 +78,6 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    # ✅ Added this step BEFORE Terraform init to remove stuck DynamoDB lock
     - name: 🧹 Force remove stuck DynamoDB lock (if any)
       run: |
         aws dynamodb delete-item \
@@ -89,6 +88,12 @@ jobs:
     - name: 🧱 Terraform Init
       working-directory: terraform
       run: terraform init -input=false
+
+    - name: 🔄 Terraform Import Existing IAM Roles
+      working-directory: terraform
+      run: |
+        terraform import aws_iam_role.ecs_instance_role react-frontend1-ecs-instance-role || true
+        terraform import aws_iam_role.ecs_task_execution_role react-frontend1-task-execution-role || true
 
     - name: 🧱 Terraform Apply (Deploy ECS EC2)
       working-directory: terraform
