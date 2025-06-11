@@ -3,7 +3,7 @@ name: Deploy LMS Frontend with SonarQube Quality Gate
 on:
   push:
     branches:
-      - main
+      - mai
 
 jobs:
   build-analyze-deploy:
