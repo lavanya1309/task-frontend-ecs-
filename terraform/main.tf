@@ -13,6 +13,10 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_ssm_parameter" "ecs_ami" {
+  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+}
+
 resource "aws_security_group" "ecs_sg" {
   name        = "${var.app_name}-sg"
   description = "Allow HTTP and SSH"
@@ -46,7 +50,7 @@ resource "aws_ecs_cluster" "main" {
   name = "${var.app_name}-cluster"
 }
 
-# ECS Instance Role + Profile
+# IAM Role for EC2 instance (ECS container host)
 resource "aws_iam_role" "ecs_instance_role" {
   name = "${var.app_name}-ecs-instance-role"
 
@@ -74,12 +78,11 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 
 # EC2 instance for ECS
 resource "aws_instance" "ecs_instance" {
-  ami                    = "ami-0c55b159cbfafe1f0" # Replace with ECS-optimized AMI
-  instance_type          = "t3.medium"
-  subnet_id              = data.aws_subnets.default.ids[0]
-  security_groups        = [aws_security_group.ecs_sg.id]
+  ami                         = data.aws_ssm_parameter.ecs_ami.value
+  instance_type               = "t3.medium"
+  subnet_id                   = data.aws_subnets.default.ids[0]
+  security_groups             = [aws_security_group.ecs_sg.id]
   associate_public_ip_address = true
-
 
   user_data = <<-EOF
               #!/bin/bash
@@ -93,7 +96,7 @@ resource "aws_instance" "ecs_instance" {
   }
 }
 
-# Task Execution Role
+# IAM Role for ECS task execution
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "${var.app_name}-task-execution-role"
 
@@ -112,6 +115,12 @@ resource "aws_iam_role" "ecs_task_execution_role" {
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# CloudWatch Log Group (optional)
+resource "aws_cloudwatch_log_group" "ecs_log_group" {
+  name              = "/ecs/${var.app_name}"
+  retention_in_days = 7
 }
 
 # ECS Task Definition
