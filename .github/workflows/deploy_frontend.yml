@@ -94,6 +94,8 @@ jobs:
       run: |
         terraform import aws_iam_role.ecs_instance_role react-frontend1-ecs-instance-role || true
         terraform import aws_iam_role.ecs_task_execution_role react-frontend1-task-execution-role || true
+        terraform import aws_iam_instance_profile.ecs_instance_profile react-frontend1-ecs-instance-profile || true
+
 
     - name: 🧱 Terraform Apply (Deploy ECS EC2)
       working-directory: terraform
