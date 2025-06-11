@@ -35,7 +35,7 @@ resource "aws_security_group" "ecs_sg" {
   }
 
   ingress {
-    description = "Allow port 3000"
+    description = "Allow app port (3000)"
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
@@ -43,7 +43,7 @@ resource "aws_security_group" "ecs_sg" {
   }
 
   ingress {
-    description = "Allow port 5000"
+    description = "Allow app port (5000)"
     from_port   = 5000
     to_port     = 5000
     protocol    = "tcp"
@@ -88,7 +88,7 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 
 resource "aws_launch_template" "ecs_lt" {
   name_prefix   = "${var.app_name}-lt"
-  image_id      = "ami-0e001c9271cf7f3b9" # Amazon ECS-optimized Amazon Linux 2 (change as needed)
+  image_id      = "ami-0e001c9271cf7f3b9" # Amazon ECS-optimized AMI (adjust region if needed)
   instance_type = "t3.micro"
 
   iam_instance_profile {
@@ -114,6 +114,7 @@ resource "aws_autoscaling_group" "ecs_asg" {
     version = "$Latest"
   }
   vpc_zone_identifier = data.aws_subnets.default.ids
+
   lifecycle {
     create_before_destroy = true
   }
@@ -131,8 +132,10 @@ resource "aws_ecs_task_definition" "app" {
     image     = var.docker_image
     essential = true
     portMappings = [
-      { containerPort = 80, hostPort = 3000 }
-      
+      {
+        containerPort = 80,
+        hostPort      = 3000
+      }
     ]
   }])
 }
@@ -143,4 +146,7 @@ resource "aws_ecs_service" "app" {
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 1
   launch_type     = "EC2"
+
+  force_new_deployment = true
+  depends_on = [aws_ecs_task_definition.app]
 }
