@@ -10,6 +10,8 @@ env:
   APP_NAME: lms-frontend
   DOCKER_USERNAME: somasekar1309
   REPO_NAME: testingpipline-lms-frontend
+  DYNAMODB_TABLE: terraform-locks
+  STATE_LOCK_ID: ecs/terraform.tfstate
 
 jobs:
   build-push-deploy:
@@ -20,7 +22,6 @@ jobs:
       uses: actions/checkout@v3
 
     - name: 🏷️ Set Docker image version tag
-      id: vars
       run: |
         VERSION_TAG="v$(git rev-list --count HEAD)"
         echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
@@ -77,9 +78,16 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
+    - name: 🧹 Force remove stuck DynamoDB lock (if any)
+      run: |
+        aws dynamodb delete-item \
+          --table-name $DYNAMODB_TABLE \
+          --key "{\"LockID\": {\"S\": \"$STATE_LOCK_ID\"}}" \
+          --region $AWS_REGION || true
+
     - name: 🧱 Terraform Init
       working-directory: terraform
-      run: terraform init
+      run: terraform init -input=false
 
     - name: 🧱 Terraform Apply (Deploy ECS EC2)
       working-directory: terraform
