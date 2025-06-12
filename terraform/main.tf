@@ -52,18 +52,10 @@ resource "aws_security_group" "ecs_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.app_name}-cluster"
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_iam_role" "ecs_instance_role" {
@@ -79,31 +71,18 @@ resource "aws_iam_role" "ecs_instance_role" {
       Action = "sts:AssumeRole"
     }]
   })
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
   role       = aws_iam_role.ecs_instance_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "${var.app_name}-ecs-instance-profile"
   role = aws_iam_role.ecs_instance_role.name
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
-# ✅ Updated: lifecycle block removed from this resource
 resource "aws_instance" "ecs_instance" {
   ami                         = data.aws_ssm_parameter.ecs_ami.value
   instance_type               = "t3.medium"
@@ -136,28 +115,16 @@ resource "aws_iam_role" "ecs_task_execution_role" {
       Action = "sts:AssumeRole"
     }]
   })
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_cloudwatch_log_group" "ecs_log_group" {
   name              = "/ecs/${var.app_name}"
   retention_in_days = 7
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "aws_ecs_task_definition" "app" {
