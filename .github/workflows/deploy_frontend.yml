@@ -3,7 +3,7 @@ name: CI/CD Frontend - ECS EC2 Deploy
 on:
   push:
     branches:
-      - mai
+      - main
 
   workflow_dispatch:
     inputs:
@@ -102,13 +102,6 @@ jobs:
       working-directory: terraform
       run: terraform init -input=false
 
-    - name: 🔄 Terraform Import Existing IAM Resources
-      working-directory: terraform
-      run: |
-        terraform import aws_iam_role.ecs_instance_role react-frontend1-ecs-instance-role || true
-        terraform import aws_iam_role.ecs_task_execution_role react-frontend1-task-execution-role || true
-        terraform import aws_iam_instance_profile.ecs_instance_profile react-frontend1-ecs-instance-profile || true
-
     - name: 📋 Terraform Plan
       if: github.event.inputs.action == 'plan'
       working-directory: terraform
@@ -123,7 +116,11 @@ jobs:
           -target=aws_ecs_task_definition.app \
           -target=aws_ecs_service.app
 
-    - name: 💣 Terraform Destroy (All Resources)
+    - name: 💣 Terraform Destroy (Only ECS Resources)
       if: github.event.inputs.action == 'destroy'
       working-directory: terraform
-      run: terraform destroy -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
+      run: |
+        terraform destroy -auto-approve \
+          -var="docker_image=$DOCKER_IMAGE_LATEST" \
+          -target=aws_ecs_task_definition.app \
+          -target=aws_ecs_service.app
