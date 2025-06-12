@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'    # Only trigger on changes to source files
+      - 'public/**'
+      - 'package.json'
+      - 'Dockerfile'
 
   workflow_dispatch:
     inputs:
@@ -26,7 +31,32 @@ env:
   STATE_LOCK_ID: ecs/terraform.tfstate
 
 jobs:
-  terraform:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.check.outputs.should-build }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Needed to get git diff
+  
+      - name: Check for relevant changes
+        id: check
+        run: |
+          # Check if any of the relevant files changed
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E 'src/|public/|package.json|Dockerfile' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No relevant changes detected"
+            echo "should-build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Relevant changes detected"
+            echo "should-build=true" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-deploy:
+    needs: check-changes
+    if: needs.check-changes.outputs.should-build == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
