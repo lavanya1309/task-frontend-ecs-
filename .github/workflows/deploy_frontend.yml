@@ -3,7 +3,7 @@ name: CI/CD Frontend - ECS EC2 Deploy
 on:
   push:
     branches:
-      - main
+      - mai
     paths:
       - 'src/**'
       - 'public/**'
