@@ -15,18 +15,11 @@ on:
       action:
         description: 'Terraform Action'
         required: true
-        default: 'plan'
+        default: 'apply'
         type: choice
         options:
-          - plan
           - apply
-          - apply-ecs
           - destroy
-          - destroy-specific
-      destroy_targets:
-        description: 'Comma-separated list of resources to destroy (e.g., aws_ecs_task_definition.app,aws_ecs_service.app)'
-        required: false
-        default: ''
 
 env:
   AWS_REGION: us-east-1
@@ -74,7 +67,7 @@ jobs:
 
   build-and-push:
     needs: check-changes
-    if: needs.check-changes.outputs.should-build == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy' && github.event.inputs.action != 'destroy-specific')
+    if: needs.check-changes.outputs.should-build == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -158,38 +151,20 @@ jobs:
         run: terraform init -input=false
 
       - name: Terraform Plan
-        if: github.event_name == 'push' || github.event.inputs.action == 'plan'
         working-directory: terraform
-        run: terraform plan -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
+        run: terraform plan -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" -var="prevent_destroy=true"
 
       - name: Terraform Apply
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
         working-directory: terraform
         run: |
-          terraform destroy -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
-          terraform apply -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
-
-      - name: Terraform Apply (ECS Task & Service)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply-ecs'
-        working-directory: terraform
-        run: |
-          terraform apply -auto-approve \
-            -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" \
-            -target=aws_ecs_task_definition.app \
-            -target=aws_ecs_service.app
+          terraform destroy -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" -var="prevent_destroy=false"
+          terraform apply -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" -var="prevent_destroy=false"
 
       - name: Terraform Destroy (All Resources)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
         working-directory: terraform
         run: |
           terraform destroy -auto-approve \
-            -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
-
-      - name: Terraform Destroy (Specific Resources)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy-specific' && github.event.inputs.destroy_targets != ''
-        working-directory: terraform
-        run: |
-          TARGETS=$(echo "${{ github.event.inputs.destroy_targets }}" | tr ',' '\n')
-          for TARGET in $TARGETS; do
-            terraform destroy -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" -target="$TARGET"
-          done
+            -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" \
+            -var="prevent_destroy=false"
