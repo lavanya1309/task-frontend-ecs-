@@ -52,6 +52,10 @@ resource "aws_security_group" "ecs_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecs_cluster" "main" {
@@ -84,6 +88,10 @@ resource "aws_iam_role" "ecs_instance_role" {
 resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
   role       = aws_iam_role.ecs_instance_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
@@ -141,11 +149,19 @@ resource "aws_iam_role" "ecs_task_execution_role" {
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   role       = aws_iam_role.ecs_task_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_cloudwatch_log_group" "ecs_log_group" {
   name              = "/ecs/${var.app_name}"
   retention_in_days = 7
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecs_task_definition" "app" {
@@ -170,7 +186,7 @@ resource "aws_ecs_task_definition" "app" {
     logConfiguration = {
       logDriver = "awslogs",
       options = {
-        awslogs-group         = "/ecs/${var.app_name}",
+        awslogs-group         = aws_cloudwatch_log_group.ecs_log_group.name,
         awslogs-region        = var.aws_region,
         awslogs-stream-prefix = "ecs"
       }
