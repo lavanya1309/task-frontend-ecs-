@@ -37,7 +37,6 @@ jobs:
         VERSION_TAG="v${{ github.run_number }}"
         echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
         echo "DOCKER_IMAGE=$DOCKER_USERNAME/$REPO_NAME:$VERSION_TAG" >> $GITHUB_ENV
-        echo "DOCKER_IMAGE_LATEST=$DOCKER_USERNAME/$REPO_NAME:latest" >> $GITHUB_ENV
         echo "📦 Docker tag: $VERSION_TAG"
 
     - name: ⚙️ Setup Node.js
@@ -63,12 +62,9 @@ jobs:
     - name: 🐳 Build Docker image
       run: |
         docker build -t $DOCKER_IMAGE .
-        docker tag $DOCKER_IMAGE $DOCKER_IMAGE_LATEST
-
-    - name: 🚀 Push Docker images
-      run: |
-        docker push $DOCKER_IMAGE
-        docker push $DOCKER_IMAGE_LATEST
+    
+    - name: 🚀 Push Docker image
+      run: docker push $DOCKER_IMAGE
 
     - name: 📊 SonarQube Scan
       uses: sonarsource/sonarqube-scan-action@v1.0.0
@@ -104,9 +100,9 @@ jobs:
     - name: 🚀 Terraform Apply (All Resources)
       if: github.event.inputs.action == 'apply' || github.event_name == 'push'
       working-directory: terraform
-      run: terraform apply -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
+      run: terraform apply -auto-approve -var="docker_image=$DOCKER_IMAGE"
 
     - name: 💣 Terraform Destroy (All Resources)
       if: github.event.inputs.action == 'destroy'
       working-directory: terraform
-      run: terraform destroy -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
+      run: terraform destroy -auto-approve -var="docker_image=$DOCKER_IMAGE"
