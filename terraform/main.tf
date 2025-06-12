@@ -201,6 +201,8 @@ resource "aws_ecs_service" "app" {
     type = "ECS"
   }
 
+  force_new_deployment = true
+ 
   depends_on = [
     aws_instance.ecs_instance,
     aws_ecs_task_definition.app
