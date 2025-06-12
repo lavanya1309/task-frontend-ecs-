@@ -5,22 +5,28 @@ on:
     branches:
       - main
     paths:
-      - 'src/**'    # Only trigger on changes to source files
+      - 'src/**'
       - 'public/**'
       - 'package.json'
       - 'Dockerfile'
-
+      - 'terraform/**'
   workflow_dispatch:
     inputs:
       action:
         description: 'Terraform Action'
         required: true
-        default: 'apply'
+        default: 'plan'
         type: choice
         options:
           - plan
           - apply
+          - apply-ecs
           - destroy
+          - destroy-specific
+      destroy_targets:
+        description: 'Comma-separated list of resources to destroy (e.g., aws_ecs_task_definition.app,aws_ecs_service.app)'
+        required: false
+        default: ''
 
 env:
   AWS_REGION: us-east-1
@@ -34,123 +40,156 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      should-build: ${{ steps.check.outputs.should-build }}
+      should-build: ${{ steps.check-source.outputs.should-build }}
+      terraform-changed: ${{ steps.check-terraform.outputs.terraform-changed }}
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Needed to get git diff
-  
-      - name: Check for relevant changes
-        id: check
+          fetch-depth: 0
+
+      - name: Check for Source File Changes
+        id: check-source
         run: |
-          # Check if any of the relevant files changed
           CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E 'src/|public/|package.json|Dockerfile' || true)
           if [ -z "$CHANGED" ]; then
-            echo "No relevant changes detected"
+            echo "No relevant source changes detected"
             echo "should-build=false" >> $GITHUB_OUTPUT
           else
-            echo "Relevant changes detected"
+            echo "Relevant source changes detected"
             echo "should-build=true" >> $GITHUB_OUTPUT
           fi
 
-  build-and-deploy:
+      - name: Check for Terraform File Changes
+        id: check-terraform
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -E 'terraform/' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No Terraform changes detected"
+            echo "terraform-changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Terraform changes detected"
+            echo "terraform-changed=true" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
     needs: check-changes
-    if: needs.check-changes.outputs.should-build == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.check-changes.outputs.should-build == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy' && github.event.inputs.action != 'destroy-specific')
     runs-on: ubuntu-latest
-
     steps:
-    - name: 🧾 Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: 🏷️ Set Docker image version tag
-      run: |
-        VERSION_TAG="v${{ github.run_number }}"
-        echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
-        echo "DOCKER_IMAGE=$DOCKER_USERNAME/$REPO_NAME:$VERSION_TAG" >> $GITHUB_ENV
-        echo "DOCKER_IMAGE_LATEST=$DOCKER_USERNAME/$REPO_NAME:latest" >> $GITHUB_ENV
-        echo "📦 Docker tag: $VERSION_TAG"
+      - name: Set Docker Image Version Tag
+        run: |
+          VERSION_TAG="v${{ github.run_number }}"
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
+          echo "DOCKER_IMAGE=$DOCKER_USERNAME/$REPO_NAME:$VERSION_TAG" >> $GITHUB_ENV
+          echo "DOCKER_IMAGE_LATEST=$DOCKER_USERNAME/$REPO_NAME:latest" >> $GITHUB_ENV
+          echo "📦 Docker tag: $VERSION_TAG"
 
-    - name: ⚙️ Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
-    - name: 📦 Install dependencies
-      run: npm ci
+      - name: Install Dependencies
+        run: npm ci
 
-    - name: 🛠️ Build React frontend
-      run: npm run build
+      - name: Build React Frontend
+        run: npm run build
 
-    - name: 📄 Create .dockerignore
-      run: |
-        echo "node_modules" > .dockerignore
-        echo "terraform" >> .dockerignore
-        echo ".github" >> .dockerignore
+      - name: Create .dockerignore
+        run: |
+          echo "node_modules" > .dockerignore
+          echo "terraform" >> .dockerignore
+          echo ".github" >> .dockerignore
 
-    - name: 🐳 Log in to Docker Hub
-      run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-    - name: 🐳 Build Docker image
-      run: |
-        docker build -t $DOCKER_IMAGE .
-        docker tag $DOCKER_IMAGE $DOCKER_IMAGE_LATEST
+      - name: Build Docker Image
+        run: |
+          docker build -t $DOCKER_IMAGE .
+          docker tag $DOCKER_IMAGE $DOCKER_IMAGE_LATEST
 
-    - name: 🚀 Push Docker images
-      run: |
-        docker push $DOCKER_IMAGE
-        docker push $DOCKER_IMAGE_LATEST
+      - name: Push Docker Images
+        run: |
+          docker push $DOCKER_IMAGE
+          docker push $DOCKER_IMAGE_LATEST
 
-    - name: 📊 SonarQube Scan
-      uses: sonarsource/sonarqube-scan-action@v1.0.0
-      with:
-        projectBaseDir: .
-      env:
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      - name: Run SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v1.0.0
+        with:
+          projectBaseDir: .
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-    - name: ⚙️ Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: 1.6.6
+  terraform-apply:
+    needs: [check-changes, build-and-push]
+    if: needs.check-changes.outputs.terraform-changed == 'true' || needs.check-changes.outputs.should-build == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: 🔐 Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.6
 
-    - name: 🧹 Remove stuck DynamoDB lock (if any)
-      run: |
-        aws dynamodb delete-item \
-          --table-name $DYNAMODB_TABLE \
-          --key "{\"LockID\": {\"S\": \"$STATE_LOCK_ID\"}}" \
-          --region $AWS_REGION || true
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: 🧱 Terraform Init
-      working-directory: terraform
-      run: terraform init -input=false
+      - name: Remove Stuck DynamoDB Lock
+        run: |
+          aws dynamodb delete-item \
+            --table-name $DYNAMODB_TABLE \
+            --key "{\"LockID\": {\"S\": \"$STATE_LOCK_ID\"}}" \
+            --region $AWS_REGION || true
 
-    - name: 📋 Terraform Plan
-      if: github.event.inputs.action == 'plan'
-      working-directory: terraform
-      run: terraform plan -var="docker_image=$DOCKER_IMAGE_LATEST"
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -input=false
 
-    - name: 🚀 Terraform Apply (Only ECS Task & Service)
-      if: github.event.inputs.action == 'apply'
-      working-directory: terraform
-      run: |
-        terraform apply -auto-approve \
-          -var="docker_image=$DOCKER_IMAGE_LATEST" \
-          -target=aws_ecs_task_definition.app \
-          -target=aws_ecs_service.app
+      - name: Terraform Plan
+        if: github.event_name == 'push' || github.event.inputs.action == 'plan'
+        working-directory: terraform
+        run: terraform plan -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
 
-    - name: 💣 Terraform Destroy (Only ECS Resources)
-      if: github.event.inputs.action == 'destroy'
-      working-directory: terraform
-      run: |
-        terraform destroy -auto-approve \
-          -var="docker_image=$DOCKER_IMAGE_LATEST" \
-          -target=aws_ecs_task_definition.app \
-          -target=aws_ecs_service.app
+      - name: Terraform Apply
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+        working-directory: terraform
+        run: |
+          terraform destroy -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
+          terraform apply -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
+
+      - name: Terraform Apply (ECS Task & Service)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply-ecs'
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" \
+            -target=aws_ecs_task_definition.app \
+            -target=aws_ecs_service.app
+
+      - name: Terraform Destroy (All Resources)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+        working-directory: terraform
+        run: |
+          terraform destroy -auto-approve \
+            -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest"
+
+      - name: Terraform Destroy (Specific Resources)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy-specific' && github.event.inputs.destroy_targets != ''
+        working-directory: terraform
+        run: |
+          TARGETS=$(echo "${{ github.event.inputs.destroy_targets }}" | tr ',' '\n')
+          for TARGET in $TARGETS; do
+            terraform destroy -auto-approve -var="docker_image=$DOCKER_USERNAME/$REPO_NAME:latest" -target="$TARGET"
+          done
