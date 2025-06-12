@@ -103,6 +103,7 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
   }
 }
 
+# ✅ Updated: lifecycle block removed from this resource
 resource "aws_instance" "ecs_instance" {
   ami                         = data.aws_ssm_parameter.ecs_ami.value
   instance_type               = "t3.medium"
@@ -119,11 +120,6 @@ resource "aws_instance" "ecs_instance" {
 
   tags = {
     Name = "${var.app_name}-ecs-instance"
-  }
-
-  lifecycle {
-    prevent_destroy = true
-    ignore_changes = [ami, user_data]
   }
 }
 
