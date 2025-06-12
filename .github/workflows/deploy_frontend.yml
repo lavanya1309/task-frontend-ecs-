@@ -113,12 +113,16 @@ jobs:
       working-directory: terraform
       run: terraform plan -var="docker_image=$DOCKER_IMAGE_LATEST"
 
-    - name: 🚀 Terraform Apply
+    - name: 🚀 Terraform Apply (Only ECS Task & Service)
       if: github.event.inputs.action == 'apply'
       working-directory: terraform
-      run: terraform apply -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
+      run: |
+        terraform apply -auto-approve \
+          -var="docker_image=$DOCKER_IMAGE_LATEST" \
+          -target=aws_ecs_task_definition.app \
+          -target=aws_ecs_service.app
 
-    - name: 💣 Terraform Destroy
+    - name: 💣 Terraform Destroy (All Resources)
       if: github.event.inputs.action == 'destroy'
       working-directory: terraform
       run: terraform destroy -auto-approve -var="docker_image=$DOCKER_IMAGE_LATEST"
