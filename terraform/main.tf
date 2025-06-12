@@ -30,7 +30,7 @@ resource "aws_security_group" "ecs_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-   ingress {
+  ingress {
     description = "Allow HTTP"
     from_port   = 3000
     to_port     = 3000
@@ -56,9 +56,12 @@ resource "aws_security_group" "ecs_sg" {
 
 resource "aws_ecs_cluster" "main" {
   name = "${var.app_name}-cluster"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
-# IAM Role for EC2 instance (ECS container host)
 resource "aws_iam_role" "ecs_instance_role" {
   name = "${var.app_name}-ecs-instance-role"
 
@@ -72,6 +75,10 @@ resource "aws_iam_role" "ecs_instance_role" {
       Action = "sts:AssumeRole"
     }]
   })
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
@@ -82,9 +89,12 @@ resource "aws_iam_role_policy_attachment" "ecs_instance_role_policy" {
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "${var.app_name}-ecs-instance-profile"
   role = aws_iam_role.ecs_instance_role.name
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
-# EC2 instance for ECS
 resource "aws_instance" "ecs_instance" {
   ami                         = data.aws_ssm_parameter.ecs_ami.value
   instance_type               = "t3.medium"
@@ -102,9 +112,13 @@ resource "aws_instance" "ecs_instance" {
   tags = {
     Name = "${var.app_name}-ecs-instance"
   }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [ami, user_data]
+  }
 }
 
-# IAM Role for ECS task execution
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "${var.app_name}-task-execution-role"
 
@@ -118,6 +132,10 @@ resource "aws_iam_role" "ecs_task_execution_role" {
       Action = "sts:AssumeRole"
     }]
   })
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
@@ -125,13 +143,11 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# CloudWatch Log Group (optional)
 resource "aws_cloudwatch_log_group" "ecs_log_group" {
   name              = "/ecs/${var.app_name}"
   retention_in_days = 7
 }
 
-# ECS Task Definition
 resource "aws_ecs_task_definition" "app" {
   family                   = "${var.app_name}-task"
   network_mode             = "bridge"
@@ -162,7 +178,6 @@ resource "aws_ecs_task_definition" "app" {
   }])
 }
 
-# ECS Service
 resource "aws_ecs_service" "app" {
   name            = "${var.app_name}-service"
   cluster         = aws_ecs_cluster.main.id
